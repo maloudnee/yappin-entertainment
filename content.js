@@ -14,7 +14,7 @@
         const params = new URLSearchParams(window.location.search);
         let showId = params.get("jbv") || "70143824";
         if (params.has("jbv")) showId = params.get("jbv");
-        console.log("Browse showID:", showId);
+        console.log("Browse showId:", showId);
 
 
             // Create overlay
@@ -27,7 +27,7 @@
             overlay.style.padding = '10px';
             overlay.style.borderRadius = '13px';
             overlay.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.2)';
-            overlay.style.zIndex = 2147483647;
+            overlay.style.zIndex = "2147483647";
             overlay.style.display = 'flex';
             overlay.style.gap = '10px';
             overlay.style.maxWidth = '250px';
@@ -35,10 +35,17 @@
             document.body.appendChild(overlay);
 
             const profiles = [
-                { id: 'mal', name: 'Mal', icon:"images/mal.png", },
-                { id: 'showtime', name: "Showtime", icon:"images/showtime.png"},
-                { id: 'makevili', name: "Makevili", icon:"images/makevili.png"}
+                { id: 'mal', name: 'Mal', icon:chrome.runtime.getURL("images/mal.png") },
+                { id: 'showtime', name: "Showtime", icon:chrome.runtime.getURL("images/showtime.png") },
+                { id: 'makevili', name: "Makevili", icon:chrome.runtime.getURL("images/makevili.png") }
             ];
+
+            // Save to storage if not already saved
+            chrome.storage.local.get("profiles", data => {
+                if (!data.profiles) {
+                    chrome.storage.local.set({ profiles });
+                }
+            });
 
             // Finding out which user is currently using and saving it
             let USER_PROFILE_ID = profiles[0].id // default
@@ -57,7 +64,7 @@
                     profileSelector.value = USER_PROFILE_ID;
                 }
             });
-            
+
             profileSelector.style.marginBottom = '10px';
             profileSelector.style.padding = '6px';
             profileSelector.style.borderRadius = '7px';
@@ -145,14 +152,14 @@
                             data.profiles[profile.id] = profileData;
                             localStorage.setItem(`yappin-show-${showId}`, JSON.stringify(data));
                             const stars = '⭐️'.repeat(profile.rating) + '☆'.repeat(5 - profile.rating);
-                            box.innterHTML = `<strong>Rating:</strong> ${stars}<br><strong>${profile.name}'s thoughts: </strong> ${profileData.thoughts}`;
+                            box.innerHTML = `<strong>Rating:</strong> ${stars}<br><strong>${profile.name}'s thoughts: </strong> ${profileData.thoughts}`;
                         };
                         box.appendChild(ratingLabel);
                         box.appendChild(ratingInput);
                         box.appendChild(input);
                         box.appendChild(saveBtn);
                     } else {
-                        box.innterHTML = `<strong>${profile.name} </strong> either didn't watch this or found it that unimpressive.`
+                        box.innerHTML = `<strong>${profile.name} </strong> either didn't watch this or found it that unimpressive.`
                     }
                     btn.appendChild(box);
                 };
@@ -162,9 +169,143 @@
         }
 
         // On watch page
-        const showId = path.split("/watch/")[1]
+        const showId = path.split("/watch/")[1];
         const video = document.querySelector("video");
         if (!video) return;
-        console.log("Watch showId:", showId)
-
+        console.log("Watch showId:", showId);
+        
+        // Helper to get profiles and current profile as a promise
+        function loadData() {
+            return new Promise(resolve => {
+                chrome.storage.local.get(["profiles", "curr_profile"], data => {
+                    const profiles = data.profiles || [];
+                    const USER_PROFILE_ID = data.curr_profile || null;
+                    resolve({ profiles, USER_PROFILE_ID });
+                });
+            });
+        }
+        
+        // Storage helpers
+        function saveComment(profileId, showId, timestamp, text) {
+            chrome.storage.local.get("comments", data => {
+                const comments = data.comments || {};
+                if (!comments[showId]) comments[showId] = {};
+                if (!comments[showId][profileId]) comments[showId][profileId] = [];
+                comments[showId][profileId].push({ timestamp, text });
+                chrome.storage.local.set({ comments });
+            });
+        }
+        
+        function loadComments(callback) {
+            chrome.storage.local.get("comments", data => {
+                const comments = (data.comments || {})[showId] || {};
+                callback(comments);
+            });
+        }
+        
+        // Message container
+        const container = document.createElement("div");
+        container.id = "yappin-popup-container";
+        container.style.position = "absolute";
+        container.style.bottom = "60px";
+        container.style.left = "20px";
+        container.style.zIndex = "2147483647";
+        container.style.display = "flex";
+        container.style.flexDirection = "column";
+        container.style.gap = "6px";
+        container.style.pointerEvents = "none";
+        document.body.appendChild(container);
+        
+        // Bubble display function
+        function showBubble(profile, text) {
+            const bubble = document.createElement("div");
+            bubble.className = "yappin-message-bubble";
+            bubble.style.background = "#0b93f6"; 
+            bubble.style.color = "white";
+            bubble.style.padding = "8px 12px";
+            bubble.style.borderRadius = "18px";
+            bubble.style.display = "inline-flex";
+            bubble.style.alignItems = "center";
+            bubble.style.fontSize = "14px";
+            bubble.style.maxWidth = "250px";
+            bubble.style.boxShadow = "0 1px 4px rgba(0,0,0,0.3)";
+            bubble.style.transform = "translateY(20px)";
+            bubble.style.opacity = "0";
+            bubble.style.transition = "all 0.3s ease-out";
+            bubble.style.gap = "8px";
+        
+            const img = document.createElement("img");
+            img.src = profile.icon || "";
+            img.style.width = "28px";
+            img.style.height = "28px";
+            img.style.borderRadius = "50%";
+            bubble.appendChild(img);
+        
+            const textSpan = document.createElement("span");
+            textSpan.textContent = `${profile.name}: ${text}`;
+            bubble.appendChild(textSpan);
+        
+            container.appendChild(bubble);
+        
+            requestAnimationFrame(() => {
+                bubble.style.transform = "translateY(0)";
+                bubble.style.opacity = "1";
+            });
+        
+            const audio = new Audio(chrome.runtime.getURL("sounds/sentmessage_1.mp3"));
+            audio.play();
+        
+            setTimeout(() => bubble.remove(), 5000);
+        }
+        
+        // Main watch page logic
+        loadData().then(({ profiles, USER_PROFILE_ID }) => {
+            const shown = new Set();
+        
+            // Interval to show comments at the right timestamps
+            setInterval(() => {
+                const t = Math.floor(video.currentTime);
+                loadComments(showComments => {
+                    Object.keys(showComments).forEach(profileId => {
+                        const msgs = showComments[profileId];
+                        msgs.forEach(msg => {
+                            const key = profileId + '|' + msg.timestamp + '|' + msg.text;
+                            if (msg.timestamp === t && !shown.has(key)) {
+                                const profile = profiles.find(p => p.id === profileId) || { name: profileId, icon: "" };
+                                showBubble(profile, msg.text);
+                                shown.add(key);
+                            }
+                        });
+                    });
+                });
+            }, 500);
+        
+            // Add comment button
+            const addBtn = document.createElement("button");
+            addBtn.textContent = "+";
+            addBtn.style.position = "absolute";
+            addBtn.style.bottom = "80px";
+            addBtn.style.right = "30px";
+            addBtn.style.padding = "10px";
+            addBtn.style.borderRadius = "50%";
+            addBtn.style.fontSize = "20px";
+            addBtn.style.cursor = "pointer";
+            addBtn.style.zIndex = "2147483647";
+            document.body.appendChild(addBtn);
+        
+            addBtn.onclick = () => {
+                if (!USER_PROFILE_ID) {
+                    alert("Please pick a profile first from the browser page.");
+                    return;
+                }
+                const text = prompt("Yap about what you just saw");
+                if (text) {
+                    const t = Math.floor(video.currentTime);
+                    saveComment(USER_PROFILE_ID, showId, t, text);
+                    alert("Message saved @ " + t + "s!");
+                    const profile = profiles.find(p => p.id === USER_PROFILE_ID) || { name: USER_PROFILE_ID, icon: "" };
+                    showBubble(profile, text);
+                }
+            };
+        });
 })();

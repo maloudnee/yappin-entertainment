@@ -10,6 +10,15 @@
             "js": ["content.js"],
             "run_at": "document_idle"
         }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "sounds/*",
+                "images/*"
+            ],
+            "matches": ["<all_urls>"]
+        }
     ]
-
+    
 }
