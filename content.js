@@ -3,9 +3,6 @@
     if (window.__yappinInjected) return;
     window.__yappinInjected = true;
 
-    // Determine if on watch or browsing page
-    const path = window.location.pathname;
-
     // Load profiles and current user
     function loadProfiles(callback) {
         const profiles = [
@@ -19,14 +16,16 @@
         });
     }
 
+    console.log("Yappin script started"); 
+
     // ======================================================================
     // BROWSE PAGE: ?jbv=xxxx
     // ======================================================================
-    if(!path.includes("/watch")) {
+    function handleBrowse() {
         const params = new URLSearchParams(window.location.search);
         const showId = params.get("jbv");
-        if (!showId) return;
-
+        if (!showId) return console.log("No showId, returning");
+        console.log(showId)
         const profiles = [
             { id: 'mal', name: 'Mal', icon:chrome.runtime.getURL("images/mal.png") },
             { id: 'showtime', name: "Showtime", icon:chrome.runtime.getURL("images/showtime.png") },
@@ -47,7 +46,7 @@
             ).singleNodeValue;
             
             if (!descriptionElement) return;
-
+            console.log("Found description element!", descriptionElement);
             // Profile bubbles container
             const bubbleContainer = document.createElement('div');
             bubbleContainer.style.display = 'flex';
@@ -140,7 +139,9 @@
         // =================================================================
         // WATCHING PAGE
         // =================================================================
-        if(path.includes("/watch/")) {
+        function handleWatch() {
+            console.log("On watch page")
+            const path = window.location.pathname;
             const showId = path.split("/watch/")[1];
 
             function injectAddButton() {
@@ -240,4 +241,28 @@
                 });
             }, 300);
         }
+
+        // ========================================================================
+        // HANDLING URL CHANGES
+        // ========================================================================
+
+        function pageChange() {
+            // Determine if on watch or browsing page
+            const path = window.location.pathname;
+            if(!path.includes("/watch")) handleBrowse();
+            else handleWatch();
+        }
+
+        // Run initially
+        pageChange();
+        
+        // Observe URL Changes
+        let lastUrl = location.href;
+        new MutationObserver(() => {
+            if(location.href !== lastUrl) {
+                lastUrl = location.href;
+                pageChange();
+            }
+        }).observe(document, { subtree: true, childList: true });
+
 })();
