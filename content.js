@@ -3,20 +3,36 @@
     if (window.__yappinInjected) return;
     window.__yappinInjected = true;
 
-    // Load profiles and current user
-    function loadProfiles(callback) {
-        const profiles = [
-            { id: 'mal', name: 'Mal', icon:chrome.runtime.getURL("images/mal.png") },
-            { id: 'showtime', name: 'Showtime', icon:chrome.runtime.getURL("images/showtime.png") },
-            {id: 'makevili', name: 'Makevili', icon:chrome.runtime.getURL("images/makevili.png") }
-        ];
-        chrome.storage.local.get(["profiles", "current_profile"], data => {
-            if (!data.profiles) chrome.storage.local.set({ profiles });
-            callback(profiles, data.current_profile || profiles[0].id);
-        });
+    // Clean UI with each profile change
+    // ======================================================================
+    // CURRENT PROFILE ?
+    // ======================================================================
+    function getCurrentProfileId() {
+        const accountLink = document.querySelector('a[aria-label*="Account"]');
+        if (!accountLink) return null;
+
+        const ariaLabel = accountLink.getAttribute('aria-label');
+        if(!ariaLabel) return null;
+
+        // Get profile name and icon
+        const name = ariaLabel.split(' - ')[0].toLowerCase();
+        const profileImg = document.querySelector('img.profile-icon') || null;
+        const icon = profileImg ? profileImg.src: null;
+
+        return { id: name.toLowerCase(), name, icon };
+    }
+
+    function activeProfileId() {
+        return getCurrentProfileId();
     }
 
     console.log("Yappin script started"); 
+
+    // Clean UI with each profile change
+    function cleanYappinUI(){
+        // Remove profile popup
+        document.querySelectorAll('#profile-popup, #yappin-bubbles, #yappin-popup-container').forEach(el => el.remove());
+    }
 
     // ======================================================================
     // BROWSE PAGE: ?jbv=xxxx
@@ -26,15 +42,22 @@
         const showId = params.get("jbv");
         if (!showId) return console.log("No showId, returning");
         console.log(showId)
-        const profiles = [
-            { id: 'mal', name: 'Mal', icon:chrome.runtime.getURL("images/mal.png") },
-            { id: 'showtime', name: "Showtime", icon:chrome.runtime.getURL("images/showtime.png") },
-            { id: 'makevili', name: "Makevili", icon:chrome.runtime.getURL("images/makevili.png") }
-        ];
 
-        // Load last profile saved if applicable 
-        chrome.storage.local.get("current_profile", data => {
-            const USER_PROFILE_ID = data.current_profile || profiles[0].id;
+        // Add profile to local storage
+        const currentProfile = getCurrentProfileId();
+        if (currentProfile) {
+            chrome.storage.local.set({ current_profile : currentProfile}, () => {
+                console.log("Saved profile:", getCurrentProfileId());
+            });
+        }        
+
+        chrome.storage.local.get(["current_profile", "profiles"], data => {
+            const current = data.current_profile;
+            let profiles = data.profiles || [];
+            if (current && !profiles.find(p => p.id === current.id)) {
+                profiles.push(current);
+                chrome.storage.local.set({ profiles });
+            }
 
             // Find description of shows/movies
             const descriptionElement = document.evaluate(
@@ -47,8 +70,11 @@
             
             if (!descriptionElement) return;
             console.log("Found description element!", descriptionElement);
+
             // Profile bubbles container
+            if (document.getElementById("yappin-bubbles")) return;
             const bubbleContainer = document.createElement('div');
+            bubbleContainer.id = "yappin-bubbles";
             bubbleContainer.style.display = 'flex';
             bubbleContainer.style.gap = '8px';
             bubbleContainer.style.marginTop = '12px';
@@ -100,29 +126,20 @@
                     const profileData = data.profiles[profile.id] || {};
 
                     if (profileData.rating && profileData.thoughts) {
-                        const stars = '⭐️'.repeat(profile.rating) + '☆'.repeat(5 - profile.rating);
+                        const stars = '⭐️'.repeat(profileData.rating) + '☆'.repeat(5 - profileData.rating);
                         popup.innerHTML = `<strong>Rating:</strong> ${stars}<br><strong>${profile.name}'s thoughts: </strong>${profileData.thoughts}`;
-                    } else if (profile.id === USER_PROFILE_ID) {
+                    } else if (profile.id === activeProfileId()?.id) {
                         const input = prompt("What do you rate this from 1 to 5?");
                         const rating = parseInt(input);
                         if(!isNaN(rating) && rating >= 1 && rating <= 5) {
                             profileData.rating = rating;
-                            const stars = '⭐️'.repeat(profileData.rating) + '☆'.repeat(5 - profile.rating);
+                            const stars = '⭐️'.repeat(profileData.rating) + '☆'.repeat(5 - profileData.rating);
                             profileData.thoughts = prompt("Yap away ... ");
                             localStorage.setItem(`yappin-show-${showId}`, JSON.stringify(data));
                             popup.innerHTML = `<strong>Rating:</strong> ${stars}<br><strong>${profile.name}'s thoughts: </strong>${profileData.thoughts}`;
                         } else {
                             alert("Invalid rating! Has to be a number between 1 and 5.");
                         }
-                        const saveBtn = document.createElement('button');
-                        saveBtn.textContent = 'SAVE';
-                        saveBtn.style.width = '100%';
-                        saveBtn.style.padding = '6px';
-                        saveBtn.style.border = 'none';
-                        saveBtn.style.borderRadius = '7px';
-                        saveBtn.style.background = '#8B0000';
-                        saveBtn.style.color = 'white';
-                        saveBtn.style.cursor = 'pointer';
                     } else {
                         popup.innerHTML = `<strong>${profile.name}</strong> either didn't watch this or found it unimpressive.`;
                     }
@@ -156,18 +173,24 @@
                 // Creating + Button
                 const addBtn = document.createElement('button');
                 addBtn.textContent = "+";
-                addBtn.style.marginLeft = "8px";
+                addBtn.style.marginLeft = "12px";       
                 addBtn.style.color = "white";
                 addBtn.style.background = "transparent";
                 addBtn.style.border = "none";
-                addBtn.style.fontSize = "20px";
+                addBtn.style.fontSize = "28px";         
+                addBtn.style.fontWeight = "bold";
                 addBtn.style.cursor = "pointer";
+                addBtn.style.zIndex = "9999";
+                addBtn.style.pointerEvents = "auto";
+                addBtn.style.display = "flex";
+                addBtn.style.alignItems = "center";
+                addBtn.style.justifyContent = "center"
 
                 // Adding messages
                 addBtn.onclick = () => {
                     const video = document.querySelector("video");
                     if(!video) return;
-                    const t = Math.round(video.currentTime);
+                    const t = Math.floor(video.currentTime);
 
                     const text = prompt("Yap away ...");
                     if(!text) return;
@@ -181,8 +204,8 @@
                     showPopup("You", text);
                 };
                 // Mark parent to avoid injecting twice
-                volumeBtn.dataset.hasYap = "true";
                 volumeBtn.parentNode.insertBefore(addBtn, volumeBtn.nextSibling);
+                volumeBtn.dataset.hasYap = "true";
             }
 
             // Display user's comments like twitch
@@ -235,7 +258,7 @@
                 Object.keys(data).forEach(time => {
                     const t = parseFloat(time);
             
-                    if (Math.abs(now - t) < 0.3) {
+                    if (Math.abs(now - t) < 1) {
                         data[t].forEach(msg => showPopup("OtherUser", msg));
                     }
                 });
@@ -247,6 +270,9 @@
         // ========================================================================
 
         function pageChange() {
+            // Get rid of any lingering items 
+            cleanYappinUI();
+            
             // Determine if on watch or browsing page
             const path = window.location.pathname;
             if(!path.includes("/watch")) handleBrowse();
