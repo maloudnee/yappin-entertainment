@@ -38,7 +38,14 @@
             const USER_PROFILE_ID = data.current_profile || profiles[0].id;
 
             // Find description of shows/movies
-            const descriptionElement = document.querySelector('.ptrack-content');
+            const descriptionElement = document.evaluate(
+                "/html/body/div[2]/div/div/div/div/div[1]/div[2]/div/div[3]/div/div[1]/div/div/div[1]/p/div",
+                document, 
+                null,
+                XPathResult.FIRST_ORDERED_NODE_TYPE,
+                null
+            ).singleNodeValue;
+            
             if (!descriptionElement) return;
 
             // Profile bubbles container
@@ -80,7 +87,7 @@
                     const rect = bubble.getBoundingClientRect();
                     popup.style.position = 'absolute';
                     popup.style.top = rect.bottom + window.scrollY + 'px';
-                    popup.style.bottom = rect.left + window.scrollX + 'px';
+                    popup.style.left = rect.left + window.scrollX + 'px';
                     popup.style.background = '#242424';
                     popup.style.padding = '10px';
                     popup.style.borderRadius = '10px';
@@ -130,144 +137,107 @@
         return; // Stop on browsing pages
     }
 
-        // On watch page
-        const showId = path.split("/watch/")[1];
-        const video = document.querySelector("video");
-        if (!video) return;
-        console.log("Watch showId:", showId);
-        
-        // Helper to get profiles and current profile as a promise
-        function loadData() {
-            return new Promise(resolve => {
-                chrome.storage.local.get(["profiles", "curr_profile"], data => {
-                    const profiles = data.profiles || [];
-                    const USER_PROFILE_ID = data.curr_profile || null;
-                    resolve({ profiles, USER_PROFILE_ID });
-                });
-            });
-        }
-        
-        // Storage helpers
-        function saveComment(profileId, showId, timestamp, text) {
-            chrome.storage.local.get("comments", data => {
-                const comments = data.comments || {};
-                if (!comments[showId]) comments[showId] = {};
-                if (!comments[showId][profileId]) comments[showId][profileId] = [];
-                comments[showId][profileId].push({ timestamp, text });
-                chrome.storage.local.set({ comments });
-            });
-        }
-        
-        function loadComments(callback) {
-            chrome.storage.local.get("comments", data => {
-                const comments = (data.comments || {})[showId] || {};
-                callback(comments);
-            });
-        }
-        
-        // Message container
-        const container = document.createElement("div");
-        container.id = "yappin-popup-container";
-        container.style.position = "absolute";
-        container.style.bottom = "60px";
-        container.style.left = "20px";
-        container.style.zIndex = "2147483647";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
-        container.style.gap = "6px";
-        container.style.pointerEvents = "none";
-        document.body.appendChild(container);
-        
-        // Bubble display function
-        function showBubble(profile, text) {
-            const bubble = document.createElement("div");
-            bubble.className = "yappin-message-bubble";
-            bubble.style.background = "#0b93f6"; 
-            bubble.style.color = "white";
-            bubble.style.padding = "8px 12px";
-            bubble.style.borderRadius = "18px";
-            bubble.style.display = "inline-flex";
-            bubble.style.alignItems = "center";
-            bubble.style.fontSize = "14px";
-            bubble.style.maxWidth = "250px";
-            bubble.style.boxShadow = "0 1px 4px rgba(0,0,0,0.3)";
-            bubble.style.transform = "translateY(20px)";
-            bubble.style.opacity = "0";
-            bubble.style.transition = "all 0.3s ease-out";
-            bubble.style.gap = "8px";
-        
-            const img = document.createElement("img");
-            img.src = profile.icon || "";
-            img.style.width = "28px";
-            img.style.height = "28px";
-            img.style.borderRadius = "50%";
-            bubble.appendChild(img);
-        
-            const textSpan = document.createElement("span");
-            textSpan.textContent = `${profile.name}: ${text}`;
-            bubble.appendChild(textSpan);
-        
-            container.appendChild(bubble);
-        
-            requestAnimationFrame(() => {
-                bubble.style.transform = "translateY(0)";
-                bubble.style.opacity = "1";
-            });
-        
-            const audio = new Audio(chrome.runtime.getURL("sounds/sentmessage_1.mp3"));
-            audio.play();
-        
-            setTimeout(() => bubble.remove(), 5000);
-        }
-        
-        // Main watch page logic
-        loadData().then(({ profiles, USER_PROFILE_ID }) => {
-            const shown = new Set();
-        
-            // Interval to show comments at the right timestamps
+        // =================================================================
+        // WATCHING PAGE
+        // =================================================================
+        if(path.includes("/watch/")) {
+            const showId = path.split("/watch/")[1];
+
+            function injectAddButton() {
+                // Grab volume button
+                const volumeIcon = document.querySelector('svg[data-icon^="Volume"]');
+                if (!volumeIcon) return;
+
+                // Avoid duplicates
+                const volumeBtn = volumeIcon.closest('button');
+                if (!volumeBtn || volumeBtn.dataset.hasYap) return;
+
+                // Creating + Button
+                const addBtn = document.createElement('button');
+                addBtn.textContent = "+";
+                addBtn.style.marginLeft = "8px";
+                addBtn.style.color = "white";
+                addBtn.style.background = "transparent";
+                addBtn.style.border = "none";
+                addBtn.style.fontSize = "20px";
+                addBtn.style.cursor = "pointer";
+
+                // Adding messages
+                addBtn.onclick = () => {
+                    const video = document.querySelector("video");
+                    if(!video) return;
+                    const t = Math.round(video.currentTime);
+
+                    const text = prompt("Yap away ...");
+                    if(!text) return;
+
+                    const showId = path.split("/watch/")[1];
+                    let data = JSON.parse(localStorage.getItem(`yappin-comments-${showId}`) || "{}");
+                    if(!data[t]) data[t] = [];
+                    data[t].push(text);
+                    localStorage.setItem(`yappin-comments-${showId}`, JSON.stringify(data));
+
+                    showPopup("You", text);
+                };
+                // Mark parent to avoid injecting twice
+                volumeBtn.dataset.hasYap = "true";
+                volumeBtn.parentNode.insertBefore(addBtn, volumeBtn.nextSibling);
+            }
+
+            // Display user's comments like twitch
+            function showPopup(user, text){
+                const container = document.getElementById("yappin-popup-container") || (() =>{
+                    const c = document.createElement('div');
+                    c.style.position = 'absolute';
+                    c.style.bottom = '80px';
+                    c.style.left = '20px';
+                    c.style.zIndex = '2147483647';
+                    c.style.display = 'flex';
+                    c.style.flexDirection = 'column';
+                    c.style.gap = '6px';
+                    document.body.appendChild(c);
+                    return c;
+                })();
+
+                const bubble = document.createElement("div");
+                bubble.textContent = `${user}: ${text}`;
+                bubble.style.background = "#0b93f6";
+                bubble.style.color = "white";
+                bubble.style.padding = "8px 12px";
+                bubble.style.borderRadius = "18px";
+                bubble.style.fontSize = "14px";
+                bubble.style.maxWidth = "250px";
+                bubble.style.boxShadow = "0 1px 4px rgba(0,0,0,0.3)";
+                bubble.style.opacity = "0";
+                bubble.style.transition = "opacity 0.3s ease";
+
+                container.appendChild(bubble);
+                requestAnimationFrame(() => bubble.style.opacity = "1");
+                
+                // Disappear after 5 seconds
+                setTimeout(() => bubble.remove(), 5000);
+            }
+
+            // Rerun injection
+            setInterval(injectAddButton, 1000);
+
+            // Look for stored messages at current timestamp
             setInterval(() => {
-                const t = Math.floor(video.currentTime);
-                loadComments(showComments => {
-                    Object.keys(showComments).forEach(profileId => {
-                        const msgs = showComments[profileId];
-                        msgs.forEach(msg => {
-                            const key = profileId + '|' + msg.timestamp + '|' + msg.text;
-                            if (msg.timestamp === t && !shown.has(key)) {
-                                const profile = profiles.find(p => p.id === profileId) || { name: profileId, icon: "" };
-                                showBubble(profile, msg.text);
-                                shown.add(key);
-                            }
-                        });
-                    });
+                const video = document.querySelector("video");
+                if (!video) return;
+            
+                const now = video.currentTime;
+                const showId = window.location.pathname.split("/watch/")[1];
+                let data = JSON.parse(localStorage.getItem(`yappin-comments-${showId}`) || "{}");
+                
+                // In case someone rewinds
+                Object.keys(data).forEach(time => {
+                    const t = parseFloat(time);
+            
+                    if (Math.abs(now - t) < 0.3) {
+                        data[t].forEach(msg => showPopup("OtherUser", msg));
+                    }
                 });
-            }, 500);
-        
-            // Add comment button
-            const addBtn = document.createElement("button");
-            addBtn.textContent = "+";
-            addBtn.style.position = "absolute";
-            addBtn.style.bottom = "80px";
-            addBtn.style.right = "30px";
-            addBtn.style.padding = "10px";
-            addBtn.style.borderRadius = "50%";
-            addBtn.style.fontSize = "20px";
-            addBtn.style.cursor = "pointer";
-            addBtn.style.zIndex = "2147483647";
-            document.body.appendChild(addBtn);
-        
-            addBtn.onclick = () => {
-                if (!USER_PROFILE_ID) {
-                    alert("Please pick a profile first from the browser page.");
-                    return;
-                }
-                const text = prompt("Yap about what you just saw");
-                if (text) {
-                    const t = Math.floor(video.currentTime);
-                    saveComment(USER_PROFILE_ID, showId, t, text);
-                    alert("Message saved @ " + t + "s!");
-                    const profile = profiles.find(p => p.id === USER_PROFILE_ID) || { name: USER_PROFILE_ID, icon: "" };
-                    showBubble(profile, text);
-                }
-            };
-        });
+            }, 300);
+        }
 })();
